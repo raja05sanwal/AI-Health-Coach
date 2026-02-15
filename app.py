@@ -3,9 +3,6 @@ import os
 import google.generativeai as genai
 from PIL import Image
 
-#GOOGLE_API_KEY= "AIzaSyA7CNIY0iQeXYw_-_tnn6DUStsIyAbidls"
-#genai.configure(api_key=GOOGLE_API_KEY)
-
 if 'health_profile' not in st.session_state:
     st.session_state.health_profile = {
     'goals': '',
