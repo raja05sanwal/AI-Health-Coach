@@ -2,7 +2,9 @@ import streamlit as st
 import os
 import google.generativeai as genai
 from PIL import Image
+from datetime import date
 
+genai.configure(api_key="AIzaSyApR36fWLWI4_PVg4kHFy1GJ2SFJ4HmJLg")
 if 'health_profile' not in st.session_state:
     st.session_state.health_profile = {
     'goals': '',
@@ -12,6 +14,20 @@ if 'health_profile' not in st.session_state:
     'restrictions': '',
     'budget': '150-200',
     'currency': 'USD'
+    }
+
+if "progress_data" not in st.session_state:
+    if "workout_streak" not in st.session_state:
+            st.session_state.workout_streak = 0
+
+    if "last_workout_date" not in st.session_state:
+        st.session_state.last_workout_date = None
+    st.session_state.progress_data = {
+        "weight": [],
+        "calories": [],
+        "workout_done": 0,
+        "days": 0,
+        "recovery": []
     }
 
 def get_gemini_response(input_prompt, image_data=None):
@@ -99,7 +115,13 @@ with st.sidebar:
         st.success("Health profile updated!")
 
 
-tab1, tab2, tab3, tab4 = st.tabs(["🏋️ workout planning", "🏋️‍♂️ meal planning", "🍎 food analysis", "🧘‍♀️ health insights"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🏋️ workout planning",
+    "🏋️‍♂️ meal planning",
+    "🍎 food analysis",
+    "🧘‍♀️ health insights",
+    "⚡ Smart Fitness Planner"
+])
 
 with tab1:
     st.subheader("🏋️ Personalized Workout Planning")
@@ -163,7 +185,20 @@ with tab1:
 
     include_youtube = st.checkbox("Include YouTube recommendations (toggle off to skip)", value=False)
 
-    if st.button("Get Workout Plan & Analysis"):
+    youtube_instruction = ""
+
+    if include_youtube:
+        youtube_instruction = """
+        Provide 3 YouTube video recommendations with:
+        - Video Title (make it searchable on YouTube)
+        - Channel Name
+        - Reason to watch
+        Do NOT provide URLs.
+        """
+
+    generate_plan = st.button("Get Workout Plan & Analysis")
+
+    if generate_plan:
         equipment_provided = bool(available_equipment and not (len(available_equipment) == 1 and available_equipment[0] == 'None'))
         details_provided = (fitness_level != 'None') or equipment_provided or (workout_frequency != 'None') or (session_duration != 'None')
 
@@ -206,9 +241,28 @@ with tab1:
                 3) Warm-up and cool-down routines.
                 4) If an image is provided, an image-based assessment with form corrections and progress commentary.
                 5) Diet suggestions for muscle building or the user's goals, with meal examples and approximate costs in the user's currency.
-                6) 3 recommended YouTube videos (title, channel, URL if available) or precise search queries and brief reasons to watch each. ONLY include YouTube recommendations if the user requested them.
                 7) Safety precautions and recovery guidance.
                 8) Clear next steps the user can take this week.
+                9) Physique assessment from image (if provided):
+                Give a score out of 10 for:
+                - Chest
+                - Arms
+                - Shoulders
+                - Core
+                - Legs
+                - Posture
+
+                Return it in this exact format:
+
+                Physique Scores:
+                Chest: X/10
+                Arms: X/10
+                Shoulders: X/10
+                Core: X/10
+                Legs: X/10
+                Posture: X/10
+
+                {youtube_instruction}
 
                 At the top of your response include a SUMMARY block with these exact keys (use these labels exactly):
                 Summary:, Main Focus:, Weekly Plan (one-line):, Diet Summary:, Estimated Weekly Cost:
@@ -219,6 +273,24 @@ with tab1:
                 response = get_gemini_response(prompt, image_data)
 
                 import re
+                import urllib.parse
+
+                physique_pattern = r"Physique Scores:\s*Chest:\s*(\d+)/10\s*Arms:\s*(\d+)/10\s*Shoulders:\s*(\d+)/10\s*Core:\s*(\d+)/10\s*Legs:\s*(\d+)/10\s*Posture:\s*(\d+)/10"
+
+                match = re.search(physique_pattern, response, re.IGNORECASE)
+
+                physique_scores = {}
+
+                if match:
+                    physique_scores = {
+                        "Chest": int(match.group(1)),
+                        "Arms": int(match.group(2)),
+                        "Shoulders": int(match.group(3)),
+                        "Core": int(match.group(4)),
+                        "Legs": int(match.group(5)),
+                        "Posture": int(match.group(6)),
+                    }
+
                 summary_keys = ["Summary:", "Main Focus:", "Weekly Plan (one-line):", "Diet Summary:", "Estimated Weekly Cost:"]
                 summary_data = {}
                 for key in summary_keys:
@@ -233,16 +305,39 @@ with tab1:
                     st.write(summary_data)
 
                 st.subheader("Workout Plan & Analysis")
+
+                if physique_scores:
+                    st.subheader("🏆 Physique Score")
+
+                    col1, col2, col3 = st.columns(3)
+
+                    score_items = list(physique_scores.items())
+
+                    for i, (part, score) in enumerate(score_items):
+                        with [col1, col2, col3][i % 3]:
+                            st.metric(part, f"{score}/10")
+                            st.progress(score / 10)
+                st.success("✅ AI Coach Response Ready")
+                st.info("📺 Copy the video title and paste it on YouTube to watch")
                 st.markdown(response)
 
+                # 🎥 Convert video titles into clickable YouTube searches
                 if include_youtube:
-                    urls = re.findall(r"https?://\S+", response)
-                    yt_urls = [u for u in urls if 'youtube.com' in u or 'youtu.be' in u]
-                    for u in yt_urls:
-                        try:
-                            st.video(u)
-                        except Exception:
-                            pass
+
+                    st.subheader("🎥 Recommended Videos")
+
+                    video_pattern = r"\d+\.\s*(.+)\n\s*Channel:\s*(.+)\n\s*Reason:\s*(.+)"
+
+                    matches = re.findall(video_pattern, response)
+
+                    for title, channel, reason in matches:
+                        search_query = urllib.parse.quote(title)
+                        youtube_search_url = f"https://www.youtube.com/results?search_query={search_query}"
+
+                        st.markdown(f"### 🔎 [{title}]({youtube_search_url})")
+                        st.write(f"📺 Channel: {channel}")
+                        st.write(f"💡 {reason}")
+                        st.write("---")
 
                 st.download_button(
                     label="Download Full Report",
@@ -316,7 +411,8 @@ with tab3:
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Meal Image", use_column_width=True)
 
-        if st.button("Analyze Meal"):
+        analyze_meal = st.button("Analyze Meal", key="analyze_meal_btn")
+        if analyze_meal:
             with st.spinner("Analyzing your meal..."):
                 image_data = input_image_setup(uploaded_file)
 
@@ -368,4 +464,231 @@ with tab4:
 
                 response = get_gemini_response(prompt)
                 st.subheader("Health Insights")
+                st.markdown(response)
+
+with tab5:
+    st.subheader("⚡ Smart Fitness Planner")
+
+    goal_mode = "Maintain"
+
+    subtab1, subtab2, subtab3, subtab4, subtab5 = st.tabs([
+        "🎯 Goal Mode",
+        "🔥 Calorie Calculator",
+        "🍱 Meal Macro Analyzer",
+        "😴 Recovery Score",
+        "📊 Progress Dashboard"
+    ])
+
+    # 🎯 GOAL MODE
+    with subtab1:
+        st.markdown("### Select Your Fitness Goal")
+
+        goal_mode = st.radio(
+            "Choose Goal",
+            ["Fat Loss", "Muscle Gain", "Maintain", "Student Budget"]
+        )
+
+        st.success(f"Your selected goal is: {goal_mode}")
+        if goal_mode == "Student Budget":
+            st.info("💰 Smart budget mode activated — AI will optimize for low-cost Indian meals.")
+
+    # 🔥 CALORIE CALCULATOR
+    with subtab2:
+        st.markdown("### Calorie & Macro Calculator")
+
+        age = st.number_input("Age", 10, 100)
+        weight = st.number_input("Weight (kg)")
+        height = st.number_input("Height (cm)")
+        gender = st.selectbox("Gender", ["Male", "Female"])
+        activity = st.selectbox("Activity Level", ["Sedentary", "Moderate", "Active"])
+
+        if st.button("Calculate Calories"):
+
+            if gender == "Male":
+                bmr = 10 * weight + 6.25 * height - 5 * age + 5
+            else:
+                bmr = 10 * weight + 6.25 * height - 5 * age - 161
+
+            activity_map = {
+                "Sedentary": 1.2,
+                "Moderate": 1.55,
+                "Active": 1.725
+            }
+
+            calories = int(bmr * activity_map[activity])
+
+            if goal_mode == "Fat Loss":
+                calories -= 400
+            elif goal_mode == "Muscle Gain":
+                calories += 300
+
+            protein = int(weight * 2)
+            fats = int(weight * 0.8)
+            carbs = int((calories - (protein*4 + fats*9)) / 4)
+
+            st.metric("Calories", f"{calories} kcal")
+            st.metric("Protein", f"{protein} g")
+            st.metric("Carbs", f"{carbs} g")
+            st.metric("Fats", f"{fats} g")
+
+    # 🍱 MEAL MACRO ANALYZER
+    with subtab3:
+        st.markdown("### AI Meal Macro Analyzer")
+
+        manual_meal = st.text_input("Enter your meal")
+
+        if st.button("Analyze Meal"):
+            with st.spinner("Analyzing your meal with AI..."):
+                prompt = f"Estimate calories and macros for: {manual_meal}"
+                response = get_gemini_response(prompt)
+                st.markdown(response)
+
+    # 😴 RECOVERY SCORE
+    with subtab4:
+        st.markdown("### Sleep & Recovery Score")
+
+        sleep = st.slider("Sleep Hours", 0, 10)
+        stress = st.slider("Stress Level", 1, 10)
+        water = st.slider("Water Intake (litres)", 0.0, 5.0)
+
+        workout_done_today = st.checkbox("✅ Workout completed today")
+
+        if st.button("Save Today’s Progress"):
+            if workout_done_today:
+                st.session_state.progress_data["workout_done"] += 1
+            if "last_logged_date" not in st.session_state:
+                st.session_state.last_logged_date = None
+
+            today = date.today()
+
+            if st.session_state.last_logged_date != today:
+                st.session_state.progress_data["days"] += 1
+                st.session_state.last_logged_date = today
+
+            st.markdown("### Workout Status Today:")
+            st.write(f'- Completed: {"YES" if workout_done_today else "NO"}')
+
+            st.session_state.progress_data["recovery"].append(
+                int((sleep * 10) - (stress * 3) + (water * 5))
+            )
+        today = date.today()
+
+        if workout_done_today:
+            if st.session_state.last_workout_date:
+                gap = (today - st.session_state.last_workout_date).days
+                if gap == 1:
+                    st.session_state.workout_streak += 1
+                elif gap > 1:
+                    st.session_state.workout_streak = 1
+            else:
+                st.session_state.workout_streak = 1
+
+            st.session_state.last_workout_date = today
+
+            st.success("Progress saved ✅")
+
+        recovery_score = int((sleep * 10) - (stress * 3) + (water * 5))
+
+        st.metric("Recovery Score", recovery_score)
+
+        with st.spinner("Analyzing your recovery..."):
+
+            if workout_done_today:
+                st.success("Great job completing your workout today 💪")
+            else:
+                prompt = f"""
+                My recovery score is {recovery_score}.
+                I have NOT completed my workout today.
+                Should I train today? Give:
+                - workout intensity
+                - duration
+                - type of workout
+                - recovery advice
+                """
+
+                response = get_gemini_response(prompt)
+                st.markdown(response)
+                
+        st.metric("🔥 Workout Streak", st.session_state.workout_streak)
+
+    with subtab5:
+        st.markdown("### 📊 Daily Progress Tracker")
+
+        weight_today = st.number_input("Today's Weight (kg)")
+        calories_today = st.number_input("Calories Consumed Today")
+        workout_done = st.checkbox("Workout Completed Today")
+
+        if st.button("Log Today’s Data"):
+
+            st.session_state.progress_data["weight"].append(weight_today)
+            st.session_state.progress_data["calories"].append(calories_today)
+            st.session_state.progress_data["recovery"].append(recovery_score)
+            st.session_state.progress_data["days"] += 1
+
+            if workout_done:
+                st.session_state.progress_data["workout_done"] += 1
+
+            st.success("Progress Logged ✅")
+
+        data = st.session_state.progress_data
+
+        if data["days"] > 0:
+
+            adherence = int((data["workout_done"] / data["days"]) * 100)
+
+            st.metric("Workout Adherence", f"{adherence}%")
+            consistency = int((len(data["weight"]) / data["days"]) * 100)
+            st.metric("⚡ Consistency Score", f"{consistency}%")
+            st.progress(adherence / 100)
+
+            st.line_chart(data["weight"], height=200)
+            st.line_chart(data["calories"], height=200)
+            st.line_chart(data["recovery"], height=200)
+
+        if st.button("Generate Today’s Smart Plan"):
+            with st.spinner("Generating your AI smart plan..."):
+
+                prompt = f"""
+                My goal is {goal_mode}
+                My recovery score is {recovery_score}
+                My adherence is {adherence}
+
+                Give:
+                - today workout intensity
+                - target calories
+                - protein target
+                - steps goal
+                - water intake
+                - one motivational line
+                """
+
+                response = get_gemini_response(prompt)
+
+                st.subheader("⚡ Your AI Smart Plan")
+                st.markdown(response)
+
+        if st.button("📅 Generate Weekly AI Report"):
+            with st.spinner("Generating your weekly AI report..."):
+
+                adherence = int((data["workout_done"] / data["days"]) * 100) if data["days"] else 0
+
+                prompt = f"""
+                Generate a weekly fitness report.
+
+                Goal: {goal_mode}
+                Workout adherence: {adherence}%
+                Workout streak: {st.session_state.workout_streak}
+                Average recovery: {sum(data["recovery"]) / len(data["recovery"]) if data["recovery"] else 0}
+
+                Give:
+                - performance summary
+                - what improved
+                - what needs focus
+                - next week strategy
+                - motivation
+                """
+
+                response = get_gemini_response(prompt)
+
+                st.subheader("📊 Weekly AI Report")
                 st.markdown(response)
