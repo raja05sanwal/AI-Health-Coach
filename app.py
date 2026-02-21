@@ -4,7 +4,6 @@ import google.generativeai as genai
 from PIL import Image
 from datetime import date
 
-genai.configure(api_key="AIzaSyApR36fWLWI4_PVg4kHFy1GJ2SFJ4HmJLg")
 if 'health_profile' not in st.session_state:
     st.session_state.health_profile = {
     'goals': '',
